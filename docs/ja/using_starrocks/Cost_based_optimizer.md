@@ -214,7 +214,7 @@ v3.5.0 以降、StarRocks は自動収集中に、テーブルのデータが前
 | statistic_auto_collect_max_predicate_column_size_on_sample_strategy | INT    | 16       | 自動フル収集タスクがサンプル収集ポリシーに当たったとき、テーブルに異常に多くのPredicate Columnがあり、この設定項目を超えた場合、タスクはPredicate Columnのフル収集に切り替わらず、すべての列のサンプル収集に維持されます。この設定項目は、この動作のためのPredicate Columnの最大値を制御します。 |
 | statistic_auto_collect_predicate_columns_threshold | INT     | 32       | 自動収集中にテーブルの列数がこの設定を超えた場合、Predicate Columnの列統計のみが収集されます。 |
 | statistic_predicate_columns_persist_interval_sec   | LONG    | 60       | FE が Predicate Column の統計情報を同期し、永続化する間隔。 |
-| statistic_predicate_columns_ttl_hours       | LONG    | 24       | FE にキャッシュされた Predicate Column 統計の消去時間。 |
+| statistic_predicate_columns_ttl_hours       | LONG    | 24       | FE にキャッシュされた Predicate Column の TTL（時間）。vacuum が古いデータを削除。負の値で vacuum を無効化。 |
 | enable_predicate_columns_collection         | BOOLEAN | TRUE     | Predicate Column の収集を有効にするかどうか。無効にすると、クエリ最適化中に Predicate Column が記録されません。 |
 | enable_manual_collect_array_ndv             | BOOLEAN | FALSE        | ARRAY タイプの NDV 情報の手動収集を有効にするかどうか。 |
 | enable_auto_collect_array_ndv               | BOOLEAN | FALSE        | ARRAY タイプの NDV 情報の自動収集を有効にするかどうか。 |

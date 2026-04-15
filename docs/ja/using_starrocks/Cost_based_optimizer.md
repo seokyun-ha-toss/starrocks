@@ -252,7 +252,7 @@ ANALYZE [FULL|SAMPLE] TABLE tbl_name
   - `PREDICATE COLUMNS`：Predicate Column のみから統計情報を収集する。v3.5.0 からサポート。
   - `MULTIPLE COLUMNS`：指定した複数の列から共同の統計情報を収集する。現在のところ、複数列の手動同期収集のみがサポートされている。手動で統計情報を収集する列の数は `statistics_max_multi_column_combined_num` を超えることはできず、デフォルト値は `10` である。v3.5.0 からサポートされている。
 
-- [WITH SYNC | ASYNC MODE]: 手動収集タスクを同期モードまたは非同期モードで実行するかどうか。指定しない場合、デフォルトで同期収集が使用されます。
+- `WITH SYNC | ASYNC MODE`: 手動収集タスクを同期モードまたは非同期モードで実行するかどうか。指定しない場合、デフォルトで同期収集が使用されます。
 
 - `PROPERTIES`: カスタムパラメータ。`PROPERTIES` が指定されていない場合、`fe.conf` ファイルのデフォルト設定が使用されます。実際に使用されるプロパティは、SHOW ANALYZE STATUS の出力の `Properties` 列で確認できます。
 
@@ -320,7 +320,7 @@ ANALYZE TABLE tbl_name UPDATE HISTOGRAM ON col_name [, col_name]
 
 - `col_name`: 統計を収集する列。複数の列をカンマ（`,`）で区切ります。このパラメータが指定されていない場合、テーブル全体が収集されます。ヒストグラムにはこのパラメータが必要です。
 
-- [WITH SYNC | ASYNC MODE]: 手動収集タスクを同期モードまたは非同期モードで実行するかどうか。指定しない場合、デフォルトで同期収集が使用されます。
+- `WITH SYNC | ASYNC MODE`: 手動収集タスクを同期モードまたは非同期モードで実行するかどうか。指定しない場合、デフォルトで同期収集が使用されます。
 
 - `WITH N BUCKETS`: ヒストグラム収集のためのバケット数 `N`。指定しない場合、`fe.conf` のデフォルト値が使用されます。
 

@@ -29,8 +29,10 @@ import com.starrocks.warehouse.cngroup.ComputeResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWorkerProvider and skips backend blacklist verification.
@@ -87,8 +89,9 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
     }
 
     /**
-     * Override selectBackupWorker to skip blacklist verification.
-     * This ensures consistent behavior with initial worker selection when skip_black_list is enabled.
+     * Picks a backup worker uniformly at random from nodes that are in the warehouse snapshot, were available
+     * when this provider was created, and are not {@code workerId}. Blocklist is not consulted, consistent with
+     * initial worker selection when skip_black_list is enabled.
      */
     @Override
     public long selectBackupWorker(long workerId) {
@@ -101,16 +104,19 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
         Preconditions.checkNotNull(allComputeNodeIds);
         Preconditions.checkState(allComputeNodeIds.contains(workerId));
 
-        int startPos = allComputeNodeIds.indexOf(workerId);
-        int attempts = allComputeNodeIds.size();
-        while (attempts-- > 0) {
-            startPos = (startPos + 1) % allComputeNodeIds.size();
-            long buddyId = allComputeNodeIds.get(startPos);
+        List<Long> eligibles = new ArrayList<>();
+        for (long buddyId : allComputeNodeIds) {
             // Skip SimpleScheduler.isInBlocklist(buddyId) check - only verify buddyId != workerId and is in availableID2ComputeNode
             if (buddyId != workerId && availableID2ComputeNode.containsKey(buddyId)) {
-                return buddyId;
+                eligibles.add(buddyId);
             }
         }
-        return -1;
+        if (eligibles.isEmpty()) {
+            return -1;
+        }
+        if (eligibles.size() == 1) {
+            return eligibles.get(0);
+        }
+        return eligibles.get(ThreadLocalRandom.current().nextInt(eligibles.size()));
     }
 }

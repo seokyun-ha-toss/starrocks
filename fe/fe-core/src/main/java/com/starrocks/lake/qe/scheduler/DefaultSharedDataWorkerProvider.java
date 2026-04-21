@@ -42,6 +42,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -56,9 +57,10 @@ import static com.starrocks.qe.WorkerProviderHelper.getNextWorker;
  * is possible that the worker may not be available later when calling the interfaces of this provider.
  * - All the nodes will be considered as available after the snapshot nodes info are captured, even though it
  * may not be true all the time.
- * - Specifically, when calling `selectBackupWorker()`, the selected node will be checked again if it is in
- * `SimpleScheduler.isInBlocklist()` or not, to make sure that the backup node is in the available node list
- * and not in the block list.
+ * - Specifically, when calling `selectBackupWorker()`, a backup is chosen uniformly at random from eligible
+ * compute nodes (alive at snapshot, not the given {@code workerId}, and not in
+ * `SimpleScheduler.isInBlocklist()` at call time) to spread load when many tablets share the same unavailable
+ * worker. Eligible nodes are still constrained to the warehouse snapshot.
  * Also in shared-data mode, all nodes will be treated as compute nodes. so the session variable @@prefer_compute_node
  * will be always true, and @@use_compute_nodes will be always -1 which means using all the available compute nodes.
  */
@@ -220,8 +222,10 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
     }
 
     /**
-     * Try to select the next workerId in the sorted list just after the workerId, if the next one is not available,
-     * e.g. also in BlockList, then try the next one in the list, until all nodes have benn tried.
+     * Picks a backup worker uniformly at random from nodes that are in the warehouse snapshot, were available
+     * when this provider was created, are not {@code workerId}, and are not blocklisted at call time.
+     * Randomization avoids funneling all tablets that shared one unavailable worker onto a single deterministic
+     * "next" CN (sorted-id circular walk).
      */
     @Override
     public long selectBackupWorker(long workerId) {
@@ -234,19 +238,20 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
         Preconditions.checkNotNull(allComputeNodeIds);
         Preconditions.checkState(allComputeNodeIds.contains(workerId));
 
-        int startPos = allComputeNodeIds.indexOf(workerId);
-        int attempts = allComputeNodeIds.size();
-        while (attempts-- > 0) {
-            // ensure the buddyId selection is stable, that is, giving the same input, the output is always the same.
-            // TODO: call StarOSAgent interface, let starmgr to choose a buddy node or trigger scheduling as necessary.
-            startPos = (startPos + 1) % allComputeNodeIds.size();
-            long buddyId = allComputeNodeIds.get(startPos);
+        List<Long> eligibles = new ArrayList<>();
+        for (long buddyId : allComputeNodeIds) {
             if (buddyId != workerId && availableID2ComputeNode.containsKey(buddyId) &&
                     !SimpleScheduler.isInBlocklist(buddyId)) {
-                return buddyId;
+                eligibles.add(buddyId);
             }
         }
-        return -1;
+        if (eligibles.isEmpty()) {
+            return -1;
+        }
+        if (eligibles.size() == 1) {
+            return eligibles.get(0);
+        }
+        return eligibles.get(ThreadLocalRandom.current().nextInt(eligibles.size()));
     }
 
     @Override

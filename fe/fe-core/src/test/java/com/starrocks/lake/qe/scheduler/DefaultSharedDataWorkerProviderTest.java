@@ -53,7 +53,6 @@ import com.starrocks.warehouse.cngroup.ComputeResource;
 import mockit.Expectations;
 import mockit.Mock;
 import mockit.MockUp;
-import org.assertj.core.util.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -392,29 +391,21 @@ public class DefaultSharedDataWorkerProviderTest {
 
     @Test
     public void testSelectBackupWorkersEvenlySelected() {
-        Set<Long> counters = Sets.newHashSet();
         WorkerProvider workerProvider = newWorkerProvider();
         Assertions.assertTrue(workerProvider.allowUsingBackupNode());
         for (long id : id2AllNodes.keySet()) {
-            long backupId = -1;
+            // setUp: empty blocklist, all nodes alive, warehouse lists all id2AllNodes => any buddy except self.
+            Set<Long> expectedBuddies = id2AllNodes.keySet().stream()
+                    .filter(buddyId -> buddyId != id)
+                    .collect(Collectors.toSet());
+            Assertions.assertFalse(expectedBuddies.isEmpty());
             for (int j = 0; j < 100; ++j) {
                 long selectedId = workerProvider.selectBackupWorker(id);
                 Assertions.assertTrue(selectedId > 0);
-                // cannot choose itself
                 Assertions.assertNotEquals(id, selectedId);
-                if (backupId == -1) {
-                    backupId = selectedId;
-                } else {
-                    // always get the same node
-                    Assertions.assertEquals(backupId, selectedId);
-                }
+                Assertions.assertTrue(expectedBuddies.contains(selectedId));
             }
-            Assertions.assertTrue(backupId != -1);
-            Assertions.assertFalse(counters.contains(id));
-            counters.add(id);
         }
-        // every node is chosen as a backup node once
-        Assertions.assertEquals(id2AllNodes.size(), counters.size());
     }
 
     @Test
@@ -435,23 +426,34 @@ public class DefaultSharedDataWorkerProviderTest {
         long unavailWorkerId = unavail.get();
         WorkerProvider provider = newWorkerProvider();
 
+        // availList matches snapshot-available nodes; unavailWorkerId is not in that list. prepareNodeAliveAndBlock
+        // removes blocklisted ids from availList, so at loop start every id here is not blocklisted; later iterations
+        // add picks to the blocklist, so eligibles are availList ids not yet blocklisted at call time.
+        Set<Long> initialBuddyPool = ImmutableSet.copyOf(availList);
+
         int selectCount = 0;
         List<Long> selectedNodeId = Lists.newArrayList();
 
         while (selectCount < availList.size() * 2 + 1) { // make sure the while loop will stop
             Assertions.assertFalse(provider.isDataNodeAvailable(unavailWorkerId));
+            Set<Long> expectedBeforePick = availList.stream()
+                    .filter(nodeId -> !SimpleScheduler.isInBlocklist(nodeId))
+                    .collect(Collectors.toSet());
             long alterNodeId = provider.selectBackupWorker(unavailWorkerId);
             if (alterNodeId == -1) {
                 break;
             }
+            Assertions.assertTrue(expectedBeforePick.contains(alterNodeId));
             // the backup node is not itself
-            Assertions.assertTrue(alterNodeId != unavailWorkerId);
+            Assertions.assertNotEquals(unavailWorkerId, alterNodeId);
             // the backup node is not any of the node before
             Assertions.assertFalse(selectedNodeId.contains(alterNodeId));
 
             for (int j = 0; j < 10; ++j) {
                 long selectAgainId = provider.selectBackupWorker(unavailWorkerId);
-                Assertions.assertEquals(alterNodeId, selectAgainId);
+                Assertions.assertTrue(expectedBeforePick.contains(selectAgainId),
+                        "repeated calls draw from the same eligible set until blocklist changes");
+                Assertions.assertNotEquals(unavailWorkerId, selectAgainId);
             }
             ++selectCount;
             // make it in blockList, so next time it will choose a different node
@@ -461,7 +463,8 @@ public class DefaultSharedDataWorkerProviderTest {
         // all nodes are in block list, no nodes can be selected anymore
         Assertions.assertEquals(-1, provider.selectBackupWorker(unavailWorkerId));
         // all the nodes are selected ever
-        Assertions.assertEquals(selectedNodeId.size(), availList.size());
+        Assertions.assertEquals(initialBuddyPool, ImmutableSet.copyOf(selectedNodeId),
+                "each iteration blocklists one new buddy until the initial pool is drained");
 
         // a random workerId that doesn't exist in workerProvider
         Assertions.assertEquals(-1, provider.selectBackupWorker(15678));

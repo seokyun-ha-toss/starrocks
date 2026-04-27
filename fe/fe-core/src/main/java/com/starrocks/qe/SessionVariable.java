@@ -1279,7 +1279,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     private boolean skipBlackList = false;
 
     @VariableMgr.VarAttr(name = BLACKLIST_BACKUP_ROUTING)
-    private String blacklistBackupRouting = BlacklistBackupRoutingPolicy.RANDOM.name();
+    private String blacklistBackupRouting = BlacklistBackupRoutingPolicy.CIRCULAR.name();
 
     @VariableMgr.VarAttr(name = RUNTIME_FILTER_SCAN_WAIT_TIME, flag = VariableMgr.INVISIBLE)
     private long runtimeFilterScanWaitTime = 20L;

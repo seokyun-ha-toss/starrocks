@@ -224,6 +224,16 @@ ALTER USER 'jack' SET PROPERTIES ('session.query_timeout' = '600');
 * 类型：String
 * 引入版本：v3.1
 
+### blacklist_backup_routing
+
+* **范围**：Session
+* **描述**：在 shared-data（存算分离）模式下，若某次扫描在规划中偏好的计算节点不在本查询当前可使用的计算节点范围内（例如节点宕机或出现在主机黑名单上），则规划器需另选备份计算节点。本变量控制在该候选集合中如何挑选备份节点。`RANDOM` 在候选集中均匀随机选取。`CIRCULAR` 在按 id 排好序的节点环上、从主节点起向后寻找第一个可用候选（确定性、与旧版行为类似）。哪些节点可作为备份还受 `skip_black_list` 影响：默认会排除位于主机黑名单上的节点；`skip_black_list` 为 `true` 时，位于黑名单的节点在集群中仍属可用时，也可能被选为备份。
+
+* **默认值**：`CIRCULAR`
+* **类型**：String
+* **合法取值**：`RANDOM`、`CIRCULAR`
+* **引入版本**：-
+
 ### catalog（3.2.4 及以后）
 
 * 描述：用于指定当前会话所在的 Catalog。

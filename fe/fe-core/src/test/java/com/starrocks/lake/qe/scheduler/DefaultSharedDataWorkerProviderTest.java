@@ -30,9 +30,11 @@ import com.starrocks.planner.PlanNodeId;
 import com.starrocks.planner.TupleDescriptor;
 import com.starrocks.planner.TupleId;
 import com.starrocks.qe.ColocatedBackendSelector;
+import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.FragmentScanRangeAssignment;
 import com.starrocks.qe.HostBlacklist;
 import com.starrocks.qe.NormalBackendSelector;
+import com.starrocks.qe.SessionVariable;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
 import com.starrocks.qe.SimpleScheduler;
 import com.starrocks.qe.scheduler.NonRecoverableException;
@@ -412,6 +414,33 @@ public class DefaultSharedDataWorkerProviderTest {
     public void testIsPreferComputeNode() {
         WorkerProvider provider = newWorkerProvider();
         Assertions.assertTrue(provider.isPreferComputeNode());
+    }
+
+    @Test
+    public void testSelectBackupWorkerCircularIsStable() {
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("CIRCULAR");
+        ctx.setThreadLocalInfo();
+        try {
+            SimpleScheduler.getHostBlacklist().clear();
+            DefaultSharedDataWorkerProvider provider = (DefaultSharedDataWorkerProvider) newWorkerProvider();
+            long first = provider.selectBackupWorker(5L);
+            Assertions.assertEquals(6L, first);
+            for (int i = 0; i < 20; i++) {
+                Assertions.assertEquals(first, provider.selectBackupWorker(5L),
+                        "CIRCULAR should return the same buddy until blocklist or availability changes");
+            }
+        } finally {
+            ConnectContext.remove();
+        }
+    }
+
+    @Test
+    public void testSetBlacklistBackupRoutingRejectsInvalid() {
+        SessionVariable sv = new ConnectContext().getSessionVariable();
+        ExceptionChecker.expectThrowsWithMsg(IllegalArgumentException.class,
+                "Legal values of blacklist_backup_routing are RANDOM | CIRCULAR",
+                () -> sv.setBlacklistBackupRouting("not_a_policy"));
     }
 
     @Test

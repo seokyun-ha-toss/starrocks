@@ -14,7 +14,6 @@
 
 package com.starrocks.lake.qe.scheduler;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReportException;
@@ -29,10 +28,8 @@ import com.starrocks.warehouse.cngroup.ComputeResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWorkerProvider and skips backend blacklist verification.
@@ -89,34 +86,11 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
     }
 
     /**
-     * Picks a backup worker uniformly at random from nodes that are in the warehouse snapshot, were available
-     * when this provider was created, and are not {@code workerId}. Blocklist is not consulted, consistent with
-     * initial worker selection when skip_black_list is enabled.
+     * Same as {@link DefaultSharedDataWorkerProvider} but blocklist is not consulted for buddy eligibility,
+     * consistent with initial worker selection when {@code skip_black_list} is enabled.
      */
     @Override
-    public long selectBackupWorker(long workerId) {
-        if (availableID2ComputeNode.isEmpty() || !id2ComputeNode.containsKey(workerId)) {
-            return -1;
-        }
-        if (allComputeNodeIds == null) {
-            createAvailableIdList();
-        }
-        Preconditions.checkNotNull(allComputeNodeIds);
-        Preconditions.checkState(allComputeNodeIds.contains(workerId));
-
-        List<Long> eligibles = new ArrayList<>();
-        for (long buddyId : allComputeNodeIds) {
-            // Skip SimpleScheduler.isInBlocklist(buddyId) check - only verify buddyId != workerId and is in availableID2ComputeNode
-            if (buddyId != workerId && availableID2ComputeNode.containsKey(buddyId)) {
-                eligibles.add(buddyId);
-            }
-        }
-        if (eligibles.isEmpty()) {
-            return -1;
-        }
-        if (eligibles.size() == 1) {
-            return eligibles.get(0);
-        }
-        return eligibles.get(ThreadLocalRandom.current().nextInt(eligibles.size()));
+    protected boolean isBuddyEligibleForBackup(long buddyId, long workerId) {
+        return buddyId != workerId && availableID2ComputeNode.containsKey(buddyId);
     }
 }

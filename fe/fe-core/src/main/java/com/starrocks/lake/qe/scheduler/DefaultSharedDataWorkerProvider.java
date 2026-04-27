@@ -23,7 +23,9 @@ import com.google.common.collect.Sets;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReportException;
 import com.starrocks.common.FeConstants;
+import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
+import com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy;
 import com.starrocks.qe.SimpleScheduler;
 import com.starrocks.qe.scheduler.NonRecoverableException;
 import com.starrocks.qe.scheduler.WorkerProvider;
@@ -57,10 +59,10 @@ import static com.starrocks.qe.WorkerProviderHelper.getNextWorker;
  * is possible that the worker may not be available later when calling the interfaces of this provider.
  * - All the nodes will be considered as available after the snapshot nodes info are captured, even though it
  * may not be true all the time.
- * - Specifically, when calling `selectBackupWorker()`, a backup is chosen uniformly at random from eligible
- * compute nodes (alive at snapshot, not the given {@code workerId}, and not in
- * `SimpleScheduler.isInBlocklist()` at call time) to spread load when many tablets share the same unavailable
- * worker. Eligible nodes are still constrained to the warehouse snapshot.
+ * - When calling `selectBackupWorker()`, a backup is chosen from eligible compute nodes (alive at snapshot,
+ *   not the given {@code workerId}, and with blacklist rules per session variable
+ *   {@code blacklist_backup_routing} / {@code skip_black_list}). The default policy is {@code RANDOM}
+ *   (uniform among eligibles). Use {@code CIRCULAR} for the legacy stable walk on the sorted id ring.
  * Also in shared-data mode, all nodes will be treated as compute nodes. so the session variable @@prefer_compute_node
  * will be always true, and @@use_compute_nodes will be always -1 which means using all the available compute nodes.
  */
@@ -221,14 +223,29 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
         return true;
     }
 
+    private static BlacklistBackupRoutingPolicy currentBlacklistBackupRoutingPolicy() {
+        return ConnectContext.getSessionVariableOrDefault().getBlacklistBackupRoutingPolicy();
+    }
+
     /**
-     * Picks a backup worker uniformly at random from nodes that are in the warehouse snapshot, were available
-     * when this provider was created, are not {@code workerId}, and are not blocklisted at call time.
-     * Randomization avoids funneling all tablets that shared one unavailable worker onto a single deterministic
-     * "next" CN (sorted-id circular walk).
+     * @param workerId The tablet's primary / preferred compute node id from the plan.
      */
     @Override
     public long selectBackupWorker(long workerId) {
+        BlacklistBackupRoutingPolicy policy = currentBlacklistBackupRoutingPolicy();
+        if (policy == BlacklistBackupRoutingPolicy.CIRCULAR) {
+            return selectBackupWorkerCircular(workerId);
+        } else if (policy == BlacklistBackupRoutingPolicy.RANDOM) {
+            return selectBackupWorkerRandom(workerId);
+        } else {
+            throw new IllegalArgumentException("Invalid blacklist backup routing policy: " + policy);
+        }
+    }
+
+    /**
+     * Picks a backup worker uniformly at random from the eligible set.
+     */
+    protected long selectBackupWorkerRandom(long workerId) {
         if (availableID2ComputeNode.isEmpty() || !id2ComputeNode.containsKey(workerId)) {
             return -1;
         }
@@ -240,8 +257,7 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
 
         List<Long> eligibles = new ArrayList<>();
         for (long buddyId : allComputeNodeIds) {
-            if (buddyId != workerId && availableID2ComputeNode.containsKey(buddyId) &&
-                    !SimpleScheduler.isInBlocklist(buddyId)) {
+            if (isBuddyEligibleForBackup(buddyId, workerId)) {
                 eligibles.add(buddyId);
             }
         }
@@ -252,6 +268,39 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
             return eligibles.get(0);
         }
         return eligibles.get(ThreadLocalRandom.current().nextInt(eligibles.size()));
+    }
+
+    /**
+     * Tries the next id in the sorted list after {@code workerId} (circular), returning the first eligible buddy.
+     */
+    protected long selectBackupWorkerCircular(long workerId) {
+        if (availableID2ComputeNode.isEmpty() || !id2ComputeNode.containsKey(workerId)) {
+            return -1;
+        }
+        if (allComputeNodeIds == null) {
+            createAvailableIdList();
+        }
+        Preconditions.checkNotNull(allComputeNodeIds);
+        Preconditions.checkState(allComputeNodeIds.contains(workerId));
+
+        int startPos = allComputeNodeIds.indexOf(workerId);
+        int attempts = allComputeNodeIds.size();
+        while (attempts-- > 0) {
+            startPos = (startPos + 1) % allComputeNodeIds.size();
+            long buddyId = allComputeNodeIds.get(startPos);
+            if (isBuddyEligibleForBackup(buddyId, workerId)) {
+                return buddyId;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether {@code buddyId} may serve as a backup for {@code workerId} for this query's worker snapshot.
+     */
+    protected boolean isBuddyEligibleForBackup(long buddyId, long workerId) {
+        return buddyId != workerId && availableID2ComputeNode.containsKey(buddyId) &&
+                !SimpleScheduler.isInBlocklist(buddyId);
     }
 
     @Override

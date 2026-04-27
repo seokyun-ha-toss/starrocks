@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.HashDistributionInfo;
 import com.starrocks.catalog.OlapTable;
@@ -391,22 +392,73 @@ public class DefaultSharedDataWorkerProviderTest {
         Assertions.assertThrows(NonRecoverableException.class, workerProvider::reportDataNodeNotFoundException);
     }
 
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#CIRCULAR}:
+     * for each primary id, every {@code selectBackupWorker} call returns the same next id on the sorted ring
+     * (an eligible node other than the primary).
+     */
     @Test
     public void testSelectBackupWorkersEvenlySelected() {
-        WorkerProvider workerProvider = newWorkerProvider();
-        Assertions.assertTrue(workerProvider.allowUsingBackupNode());
-        for (long id : id2AllNodes.keySet()) {
-            // setUp: empty blocklist, all nodes alive, warehouse lists all id2AllNodes => any buddy except self.
-            Set<Long> expectedBuddies = id2AllNodes.keySet().stream()
-                    .filter(buddyId -> buddyId != id)
-                    .collect(Collectors.toSet());
-            Assertions.assertFalse(expectedBuddies.isEmpty());
-            for (int j = 0; j < 100; ++j) {
-                long selectedId = workerProvider.selectBackupWorker(id);
-                Assertions.assertTrue(selectedId > 0);
-                Assertions.assertNotEquals(id, selectedId);
-                Assertions.assertTrue(expectedBuddies.contains(selectedId));
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("CIRCULAR");
+        ctx.setThreadLocalInfo();
+        try {
+            Set<Long> counters = Sets.newHashSet();
+            WorkerProvider workerProvider = newWorkerProvider();
+            Assertions.assertTrue(workerProvider.allowUsingBackupNode());
+            for (long id : id2AllNodes.keySet()) {
+                long backupId = -1;
+                for (int j = 0; j < 100; ++j) {
+                    long selectedId = workerProvider.selectBackupWorker(id);
+                    Assertions.assertTrue(selectedId > 0);
+                    // cannot choose itself
+                    Assertions.assertNotEquals(id, selectedId);
+                    if (backupId == -1) {
+                        backupId = selectedId;
+                    } else {
+                        // always get the same node
+                        Assertions.assertEquals(backupId, selectedId);
+                    }
+                }
+                Assertions.assertTrue(backupId != -1);
+                Assertions.assertFalse(counters.contains(id));
+                counters.add(id);
             }
+            // every node is chosen as a backup node once
+            Assertions.assertEquals(id2AllNodes.size(), counters.size());
+        } finally {
+            ConnectContext.remove();
+        }
+    }
+
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#RANDOM}:
+     * each call returns some eligible backup (not the primary); successive draws may differ.
+     */
+    @Test
+    public void testSelectBackupWorkersRandomFromEligibleBuddies() {
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("RANDOM");
+        ctx.setThreadLocalInfo();
+        try {
+            WorkerProvider workerProvider = newWorkerProvider();
+            Assertions.assertTrue(workerProvider.allowUsingBackupNode());
+            for (long id : id2AllNodes.keySet()) {
+                Set<Long> expectedBuddies = id2AllNodes.keySet().stream()
+                        .filter(buddyId -> buddyId != id)
+                        .collect(Collectors.toSet());
+                Assertions.assertFalse(expectedBuddies.isEmpty());
+                for (int j = 0; j < 100; ++j) {
+                    long selectedId = workerProvider.selectBackupWorker(id);
+                    Assertions.assertTrue(selectedId > 0);
+                    // cannot choose itself
+                    Assertions.assertNotEquals(id, selectedId);
+                    // the backup node is in the expected buddies
+                    Assertions.assertTrue(expectedBuddies.contains(selectedId));
+                }
+            }
+        } finally {
+            ConnectContext.remove();
         }
     }
 
@@ -417,25 +469,6 @@ public class DefaultSharedDataWorkerProviderTest {
     }
 
     @Test
-    public void testSelectBackupWorkerCircularIsStable() {
-        ConnectContext ctx = new ConnectContext();
-        ctx.getSessionVariable().setBlacklistBackupRouting("CIRCULAR");
-        ctx.setThreadLocalInfo();
-        try {
-            SimpleScheduler.getHostBlacklist().clear();
-            DefaultSharedDataWorkerProvider provider = (DefaultSharedDataWorkerProvider) newWorkerProvider();
-            long first = provider.selectBackupWorker(5L);
-            Assertions.assertEquals(6L, first);
-            for (int i = 0; i < 20; i++) {
-                Assertions.assertEquals(first, provider.selectBackupWorker(5L),
-                        "CIRCULAR should return the same buddy until blocklist or availability changes");
-            }
-        } finally {
-            ConnectContext.remove();
-        }
-    }
-
-    @Test
     public void testSetBlacklistBackupRoutingRejectsInvalid() {
         SessionVariable sv = new ConnectContext().getSessionVariable();
         ExceptionChecker.expectThrowsWithMsg(IllegalArgumentException.class,
@@ -443,60 +476,120 @@ public class DefaultSharedDataWorkerProviderTest {
                 () -> sv.setBlacklistBackupRouting("not_a_policy"));
     }
 
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#CIRCULAR}:
+     * when the plan primary is not in the available snapshot, {@code selectBackupWorker} still picks an eligible
+     * backup; repeated calls match until that id is blocklisted, then the ring walk advances to the next eligible.
+     */
     @Test
-    public void testSelectBackupWorkerStable() {
-        HostBlacklist blockList = SimpleScheduler.getHostBlacklist();
-        SystemInfoService sysInfo = GlobalStateMgr.getCurrentState().getNodeMgr().getClusterInfo();
-        List<Long> availList = prepareNodeAliveAndBlock(sysInfo, blockList);
+    public void testSelectBackupWorkerCircularExhaustsEligibles() {
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("CIRCULAR");
+        ctx.setThreadLocalInfo();
+        try {
+            HostBlacklist blockList = SimpleScheduler.getHostBlacklist();
+            SystemInfoService sysInfo = GlobalStateMgr.getCurrentState().getNodeMgr().getClusterInfo();
+            List<Long> availList = prepareNodeAliveAndBlock(sysInfo, blockList);
 
-        Optional<Long> unavail = id2AllNodes.keySet().stream().filter(x -> !availList.contains(x)).findAny();
-        Assertions.assertTrue(unavail.isPresent());
+            Optional<Long> unavail = id2AllNodes.keySet().stream().filter(x -> !availList.contains(x)).findAny();
+            Assertions.assertTrue(unavail.isPresent());
 
-        long unavailWorkerId = unavail.get();
-        WorkerProvider provider = newWorkerProvider();
+            long unavailWorkerId = unavail.get();
+            WorkerProvider provider = newWorkerProvider();
 
-        // availList matches snapshot-available nodes; unavailWorkerId is not in that list. prepareNodeAliveAndBlock
-        // removes blocklisted ids from availList, so at loop start every id here is not blocklisted; later iterations
-        // add picks to the blocklist, so eligibles are availList ids not yet blocklisted at call time.
-        Set<Long> initialBuddyPool = ImmutableSet.copyOf(availList);
+            int selectCount = 0;
+            List<Long> selectedNodeId = Lists.newArrayList();
 
-        int selectCount = 0;
-        List<Long> selectedNodeId = Lists.newArrayList();
+            while (selectCount < availList.size() * 2 + 1) { // make sure the while loop will stop
+                Assertions.assertFalse(provider.isDataNodeAvailable(unavailWorkerId));
+                long alterNodeId = provider.selectBackupWorker(unavailWorkerId);
+                if (alterNodeId == -1) {
+                    break;
+                }
+                // the backup node is not itself
+                Assertions.assertNotEquals(unavailWorkerId, alterNodeId);
+                // the backup node is not any of the node before
+                Assertions.assertFalse(selectedNodeId.contains(alterNodeId));
 
-        while (selectCount < availList.size() * 2 + 1) { // make sure the while loop will stop
-            Assertions.assertFalse(provider.isDataNodeAvailable(unavailWorkerId));
-            Set<Long> expectedBeforePick = availList.stream()
-                    .filter(nodeId -> !SimpleScheduler.isInBlocklist(nodeId))
-                    .collect(Collectors.toSet());
-            long alterNodeId = provider.selectBackupWorker(unavailWorkerId);
-            if (alterNodeId == -1) {
-                break;
+                for (int j = 0; j < 10; ++j) {
+                    long selectAgainId = provider.selectBackupWorker(unavailWorkerId);
+                    Assertions.assertEquals(alterNodeId, selectAgainId);
+                }
+                ++selectCount;
+                // make it in blockList, so next time it will choose a different node
+                blockList.add(alterNodeId);
+                selectedNodeId.add(alterNodeId);
             }
-            Assertions.assertTrue(expectedBeforePick.contains(alterNodeId));
-            // the backup node is not itself
-            Assertions.assertNotEquals(unavailWorkerId, alterNodeId);
-            // the backup node is not any of the node before
-            Assertions.assertFalse(selectedNodeId.contains(alterNodeId));
+            // all nodes are in block list, no nodes can be selected anymore
+            Assertions.assertEquals(-1, provider.selectBackupWorker(unavailWorkerId));
+            // all the nodes are selected ever
+            Assertions.assertEquals(selectedNodeId.size(), availList.size());
 
-            for (int j = 0; j < 10; ++j) {
-                long selectAgainId = provider.selectBackupWorker(unavailWorkerId);
-                Assertions.assertTrue(expectedBeforePick.contains(selectAgainId),
-                        "repeated calls draw from the same eligible set until blocklist changes");
-                Assertions.assertNotEquals(unavailWorkerId, selectAgainId);
-            }
-            ++selectCount;
-            // make it in blockList, so next time it will choose a different node
-            blockList.add(alterNodeId);
-            selectedNodeId.add(alterNodeId);
+            // a random workerId that doesn't exist in workerProvider
+            Assertions.assertEquals(-1, provider.selectBackupWorker(15678));
+        } finally {
+            ConnectContext.remove();
         }
-        // all nodes are in block list, no nodes can be selected anymore
-        Assertions.assertEquals(-1, provider.selectBackupWorker(unavailWorkerId));
-        // all the nodes are selected ever
-        Assertions.assertEquals(initialBuddyPool, ImmutableSet.copyOf(selectedNodeId),
-                "each iteration blocklists one new buddy until the initial pool is drained");
+    }
 
-        // a random workerId that doesn't exist in workerProvider
-        Assertions.assertEquals(-1, provider.selectBackupWorker(15678));
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#RANDOM}:
+     * when the plan primary is not in the available snapshot, {@code selectBackupWorker} still picks an eligible
+     * backup; until the blocklist changes, repeated calls may return any value in the current eligible set, and
+     * successive blocklist updates eventually exhaust eligibles.
+     */
+    @Test
+    public void testSelectBackupWorkerRandomExhaustsEligibles() {
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("RANDOM");
+        ctx.setThreadLocalInfo();
+        try {
+            HostBlacklist blockList = SimpleScheduler.getHostBlacklist();
+            SystemInfoService sysInfo = GlobalStateMgr.getCurrentState().getNodeMgr().getClusterInfo();
+            List<Long> availList = prepareNodeAliveAndBlock(sysInfo, blockList);
+
+            Optional<Long> unavail = id2AllNodes.keySet().stream().filter(x -> !availList.contains(x)).findAny();
+            Assertions.assertTrue(unavail.isPresent());
+
+            long unavailWorkerId = unavail.get();
+            WorkerProvider provider = newWorkerProvider();
+
+            Set<Long> initialBuddyPool = ImmutableSet.copyOf(availList);
+
+            int selectCount = 0;
+            List<Long> selectedNodeId = Lists.newArrayList();
+
+            while (selectCount < availList.size() * 2 + 1) {
+                Assertions.assertFalse(provider.isDataNodeAvailable(unavailWorkerId));
+                Set<Long> expectedBeforePick = availList.stream()
+                        .filter(nodeId -> !SimpleScheduler.isInBlocklist(nodeId))
+                        .collect(Collectors.toSet());
+                long alterNodeId = provider.selectBackupWorker(unavailWorkerId);
+                if (alterNodeId == -1) {
+                    break;
+                }
+                Assertions.assertTrue(expectedBeforePick.contains(alterNodeId));
+                Assertions.assertNotEquals(unavailWorkerId, alterNodeId);
+                Assertions.assertFalse(selectedNodeId.contains(alterNodeId));
+
+                for (int j = 0; j < 10; ++j) {
+                    long selectAgainId = provider.selectBackupWorker(unavailWorkerId);
+                    Assertions.assertTrue(expectedBeforePick.contains(selectAgainId),
+                            "repeated calls draw from the same eligible set until blocklist changes");
+                    Assertions.assertNotEquals(unavailWorkerId, selectAgainId);
+                }
+                ++selectCount;
+                blockList.add(alterNodeId);
+                selectedNodeId.add(alterNodeId);
+            }
+            Assertions.assertEquals(-1, provider.selectBackupWorker(unavailWorkerId));
+            Assertions.assertEquals(initialBuddyPool, ImmutableSet.copyOf(selectedNodeId),
+                    "each iteration blocklists one new buddy until the initial pool is drained");
+
+            Assertions.assertEquals(-1, provider.selectBackupWorker(15678));
+        } finally {
+            ConnectContext.remove();
+        }
     }
 
     private OlapScanNode newOlapScanNode(int id, int numBuckets) {

@@ -35,7 +35,6 @@ import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.FragmentScanRangeAssignment;
 import com.starrocks.qe.HostBlacklist;
 import com.starrocks.qe.NormalBackendSelector;
-import com.starrocks.qe.SessionVariable;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
 import com.starrocks.qe.SimpleScheduler;
 import com.starrocks.qe.scheduler.NonRecoverableException;

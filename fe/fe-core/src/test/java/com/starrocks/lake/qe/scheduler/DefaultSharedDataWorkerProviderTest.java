@@ -559,7 +559,7 @@ public class DefaultSharedDataWorkerProviderTest {
             int selectCount = 0;
             List<Long> selectedNodeId = Lists.newArrayList();
 
-            while (selectCount < availList.size() * 2 + 1) {
+            while (selectCount < availList.size() * 2 + 1) { // make sure the while loop will stop
                 Assertions.assertFalse(provider.isDataNodeAvailable(unavailWorkerId));
                 Set<Long> expectedBeforePick = availList.stream()
                         .filter(nodeId -> !SimpleScheduler.isInBlocklist(nodeId))
@@ -568,8 +568,11 @@ public class DefaultSharedDataWorkerProviderTest {
                 if (alterNodeId == -1) {
                     break;
                 }
+                // the backup is among currently non-blocklisted avail nodes (RANDOM pool for this round)
                 Assertions.assertTrue(expectedBeforePick.contains(alterNodeId));
+                // the backup node is not itself
                 Assertions.assertNotEquals(unavailWorkerId, alterNodeId);
+                // the backup node is not any of the node before
                 Assertions.assertFalse(selectedNodeId.contains(alterNodeId));
 
                 for (int j = 0; j < 10; ++j) {
@@ -579,13 +582,17 @@ public class DefaultSharedDataWorkerProviderTest {
                     Assertions.assertNotEquals(unavailWorkerId, selectAgainId);
                 }
                 ++selectCount;
+                // make it in blockList, so next time it will choose a different node
                 blockList.add(alterNodeId);
                 selectedNodeId.add(alterNodeId);
             }
+            // all nodes are in block list, no nodes can be selected anymore
             Assertions.assertEquals(-1, provider.selectBackupWorker(unavailWorkerId));
+            // all the nodes are selected ever
             Assertions.assertEquals(initialBuddyPool, ImmutableSet.copyOf(selectedNodeId),
                     "each iteration blocklists one new buddy until the initial pool is drained");
 
+            // a random workerId that doesn't exist in workerProvider
             Assertions.assertEquals(-1, provider.selectBackupWorker(15678));
         } finally {
             ConnectContext.remove();

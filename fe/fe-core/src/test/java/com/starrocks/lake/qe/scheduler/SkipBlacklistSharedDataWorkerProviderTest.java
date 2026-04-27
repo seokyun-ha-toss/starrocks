@@ -16,6 +16,7 @@ package com.starrocks.lake.qe.scheduler;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
 import com.starrocks.qe.SimpleScheduler;
 import com.starrocks.server.WarehouseManager;
@@ -36,6 +37,10 @@ import java.util.function.Supplier;
 
 public class SkipBlacklistSharedDataWorkerProviderTest {
 
+    /**
+     * Asserts that {@code selected} is a valid backup for {@code workerId}: either {@code -1} when there is no
+     * eligible buddy, or a node id in {@code expectedEligible} and not equal to {@code workerId}.
+     */
     private static void assertSelectBackupWorkerRespectsEligible(long workerId, long selected,
             Set<Long> expectedEligible) {
         if (expectedEligible.isEmpty()) {
@@ -65,6 +70,11 @@ public class SkipBlacklistSharedDataWorkerProviderTest {
         return ImmutableMap.copyOf(res);
     }
 
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#CIRCULAR}:
+     * {@link SkipBlacklistSharedDataWorkerProvider} may use a blocklisted buddy; default provider skips it and
+     * takes the next id on the sorted ring.
+     */
     @Test
     public void testSelectBackupWorkerSkipsBlacklist() {
         ImmutableMap<Long, ComputeNode> id2ComputeNode = genWorkers(10, 15, ComputeNode::new, false);
@@ -93,31 +103,112 @@ public class SkipBlacklistSharedDataWorkerProviderTest {
             }
         };
 
-        // Test SkipBlacklistSharedDataWorkerProvider - should select blacklisted node as backup
-        SkipBlacklistSharedDataWorkerProvider.Factory skipFactory =
-                new SkipBlacklistSharedDataWorkerProvider.Factory();
-        SkipBlacklistSharedDataWorkerProvider skipProvider =
-                skipFactory.captureAvailableWorkers(
-                        null,  // Not used in our mock
-                        false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
-                        WarehouseManager.DEFAULT_RESOURCE);
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("CIRCULAR");
+        ctx.setThreadLocalInfo();
+        try {
+            // Test SkipBlacklistSharedDataWorkerProvider - should select blacklisted node as backup
+            SkipBlacklistSharedDataWorkerProvider.Factory skipFactory =
+                    new SkipBlacklistSharedDataWorkerProvider.Factory();
+            SkipBlacklistSharedDataWorkerProvider skipProvider =
+                    skipFactory.captureAvailableWorkers(
+                            null, // Not used in our mock
+                            false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
+                            WarehouseManager.DEFAULT_RESOURCE);
 
-        DefaultSharedDataWorkerProvider.Factory defaultFactory =
-                new DefaultSharedDataWorkerProvider.Factory();
-        DefaultSharedDataWorkerProvider defaultProvider =
-                defaultFactory.captureAvailableWorkers(
-                        null,  // Not used in our mock
-                        false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
-                        WarehouseManager.DEFAULT_RESOURCE);
+            // Select node 10, then try to get backup worker
+            // The backup should be node 11 (which is in blacklist) because skip_black_list is enabled
+            long backupWorker = skipProvider.selectBackupWorker(10L);
+            Assertions.assertEquals(11L, backupWorker,
+                    "Backup worker should be node 11 (in blacklist) when skip_black_list is enabled");
 
-        long workerId = 10L;
-        // Expected eligibles for workerId=10 mirror selectBackupWorker(): warehouse order walk, buddy != workerId,
-        // buddy in snapshot available map; default also requires !isInBlocklist at call time.
-        Set<Long> skipEligible = ImmutableSet.of(11L, 12L, 13L, 14L);
-        Set<Long> defaultEligible = ImmutableSet.of(12L, 13L, 14L);
+            // Test DefaultSharedDataWorkerProvider - should NOT select blacklisted node as backup
+            DefaultSharedDataWorkerProvider.Factory defaultFactory =
+                    new DefaultSharedDataWorkerProvider.Factory();
+            DefaultSharedDataWorkerProvider defaultProvider =
+                    defaultFactory.captureAvailableWorkers(
+                            null, // Not used in our mock
+                            false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
+                            WarehouseManager.DEFAULT_RESOURCE);
 
-        assertSelectBackupWorkerRespectsEligible(workerId, skipProvider.selectBackupWorker(workerId), skipEligible);
-        assertSelectBackupWorkerRespectsEligible(workerId, defaultProvider.selectBackupWorker(workerId),
-                defaultEligible);
+            // Select node 10 again, then try to get backup worker
+            // The backup should be node 12 (skip node 11 which is in blacklist)
+            long defaultBackupWorker = defaultProvider.selectBackupWorker(10L);
+            Assertions.assertEquals(12L, defaultBackupWorker,
+                    "Backup worker should be node 12 (skipping blacklisted node 11) with default provider");
+        } finally {
+            ConnectContext.remove();
+        }
+    }
+
+    /**
+     * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#RANDOM}:
+     * same eligibles as {@link #testSelectBackupWorkerSkipsBlacklist}, but each call draws uniformly from the
+     * eligible set (not necessarily the same id as the circular next-node choice).
+     */
+    @Test
+    public void testSelectBackupWorkerSkipsBlacklistRandom() {
+        ImmutableMap<Long, ComputeNode> id2ComputeNode = genWorkers(10, 15, ComputeNode::new, false);
+
+        long inBlacklistCNId = 11L;
+        Set<Long> blacklistWorkerIds = ImmutableSet.of(inBlacklistCNId);
+
+        new MockUp<SimpleScheduler>() {
+            @Mock
+            public boolean isInBlocklist(long backendId) {
+                return blacklistWorkerIds.contains(backendId);
+            }
+        };
+
+        new MockUp<WarehouseManager>() {
+            @Mock
+            public List<Long> getAllComputeNodeIds(ComputeResource computeResource) {
+                return Arrays.asList(10L, 11L, 12L, 13L, 14L);
+            }
+        };
+        new MockUp<SystemInfoService>() {
+            @Mock
+            public ComputeNode getBackendOrComputeNode(long nodeId) {
+                return id2ComputeNode.get(nodeId);
+            }
+        };
+
+        ConnectContext ctx = new ConnectContext();
+        ctx.getSessionVariable().setBlacklistBackupRouting("RANDOM");
+        ctx.setThreadLocalInfo();
+        try {
+            // Test SkipBlacklistSharedDataWorkerProvider - should include blacklisted node as backup
+            SkipBlacklistSharedDataWorkerProvider.Factory skipFactory =
+                    new SkipBlacklistSharedDataWorkerProvider.Factory();
+            SkipBlacklistSharedDataWorkerProvider skipProvider =
+                    skipFactory.captureAvailableWorkers(
+                            null, // Not used in our mock
+                            false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
+                            WarehouseManager.DEFAULT_RESOURCE);
+
+            // Test DefaultSharedDataWorkerProvider - should NOT select blacklisted node as backup
+            DefaultSharedDataWorkerProvider.Factory defaultFactory =
+                    new DefaultSharedDataWorkerProvider.Factory();
+            DefaultSharedDataWorkerProvider defaultProvider =
+                    defaultFactory.captureAvailableWorkers(
+                            null, // Not used in our mock
+                            false, -1, ComputationFragmentSchedulingPolicy.ALL_NODES,
+                            WarehouseManager.DEFAULT_RESOURCE);
+
+            long workerId = 10L;
+            Set<Long> skipEligible = ImmutableSet.of(11L, 12L, 13L, 14L);
+            Set<Long> defaultEligible = ImmutableSet.of(12L, 13L, 14L);
+
+            for (int j = 0; j < 100; j++) {
+                // Test SkipBlacklistSharedDataWorkerProvider - should include blacklisted node as backup
+                assertSelectBackupWorkerRespectsEligible(workerId, skipProvider.selectBackupWorker(workerId),
+                        skipEligible);
+                // Test DefaultSharedDataWorkerProvider - should NOT select blacklisted node as backup
+                assertSelectBackupWorkerRespectsEligible(workerId, defaultProvider.selectBackupWorker(workerId),
+                        defaultEligible);
+            }
+        } finally {
+            ConnectContext.remove();
+        }
     }
 }

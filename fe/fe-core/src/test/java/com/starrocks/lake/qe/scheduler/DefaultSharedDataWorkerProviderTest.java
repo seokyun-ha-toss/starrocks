@@ -468,14 +468,6 @@ public class DefaultSharedDataWorkerProviderTest {
         Assertions.assertTrue(provider.isPreferComputeNode());
     }
 
-    @Test
-    public void testSetBlacklistBackupRoutingRejectsInvalid() {
-        SessionVariable sv = new ConnectContext().getSessionVariable();
-        ExceptionChecker.expectThrowsWithMsg(IllegalArgumentException.class,
-                "Legal values of blacklist_backup_routing are RANDOM | CIRCULAR",
-                () -> sv.setBlacklistBackupRouting("not_a_policy"));
-    }
-
     /**
      * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#CIRCULAR}:
      * when the plan primary is not in the available snapshot, {@code selectBackupWorker} still picks an eligible

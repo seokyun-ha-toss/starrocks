@@ -231,7 +231,7 @@ ALTER USER 'jack' SET PROPERTIES ('session.query_timeout' = '600');
 
 * **默认值**：`CIRCULAR`
 * **类型**：String
-* **合法取值**：`RANDOM`、`CIRCULAR`
+* **合法取值**：`CIRCULAR`、`RANDOM`
 * **引入版本**：-
 
 ### catalog（3.2.4 及以后）
@@ -356,7 +356,7 @@ ALTER USER 'jack' SET PROPERTIES ('session.query_timeout' = '600');
 * 描述：用于指定写入 Hive 表或 Iceberg 表时以及使用 Files() 导出数据时的压缩算法。有效值：`uncompressed`、`snappy`、`lz4`、`zstd`、`gzip`。该参数只在以下情况生效：
   * Hive 表中未指定 `compression_codec` 属性。
   * Iceberg 表中未包含`write.parquet.compression-codec` 属性。
-  * `INSERT INTO FILES` 时未设置 `compression` 属性。 
+  * `INSERT INTO FILES` 时未设置 `compression` 属性。
 * 默认值：uncompressed
 * 类型：String
 * 引入版本：v3.2.3
@@ -1271,7 +1271,7 @@ ALTER USER 'jack' SET PROPERTIES ('session.query_timeout' = '600');
 
 * 描述：StarRocks 从外部存储系统读取数据时，控制数据缓存填充行为。有效值包括：
   * `auto`（默认）：系统自动根据查询的特点，选择性进行缓存。
-  * `always`：总是缓存数据。 
+  * `always`：总是缓存数据。
   * `never` 永不缓存数据。
 * 默认值：auto
 * 引入版本：v3.3.2
@@ -1357,7 +1357,7 @@ ALTER USER 'jack' SET PROPERTIES ('session.query_timeout' = '600');
 * 默认值：100
 * 引入版本：v3.0
 
-### resource_group 
+### resource_group
 
 * **描述**: 此会话指定的 resource group
 * **默认值**: ""

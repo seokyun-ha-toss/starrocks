@@ -106,14 +106,14 @@ public class SessionVariableConstants {
      */
     public enum BlacklistBackupRoutingPolicy {
         /**
-         * Choose uniformly at random from eligible nodes (default).
-         */
-        RANDOM,
-        /**
          * Walk the sorted warehouse node id ring starting from the primary worker and return the first eligible
-         * buddy (legacy deterministic behavior).
+         * buddy (default, deterministic behavior).
          */
-        CIRCULAR;
+        CIRCULAR,
+        /**
+         * Choose uniformly at random from eligible nodes.
+         */
+        RANDOM;
 
         public static BlacklistBackupRoutingPolicy getDefault() {
             return CIRCULAR;

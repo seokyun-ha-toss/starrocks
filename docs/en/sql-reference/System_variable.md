@@ -240,7 +240,7 @@ Used for MySQL client compatibility. No practical usage.
 * **Description**: In shared-data mode, if the compute node the plan prefers for a scan is not among the workers available to the current query (for example, the node is down or appears on the host blocklist), the planner must choose a backup compute node. This variable sets how that backup is chosen among eligible nodes (other than the primary). `RANDOM` samples uniformly at random from the eligible set. `CIRCULAR` walks the sorted compute node id ring from the primary and takes the first eligible node (deterministic). Which nodes are eligible for backup also depends on `skip_black_list`: by default, nodes on the host blocklist are excluded; if `skip_black_list` is `true`, a node that is on the blocklist may still be chosen as a backup when it is otherwise available (for example, alive and in the warehouse).
 * **Default**: `CIRCULAR`
 * **Data type**: String
-* **Valid values**: `RANDOM`, `CIRCULAR`
+* **Valid values**: `CIRCULAR`, `RANDOM`
 * **Introduced in**: -
 
 ### broadcast_row_limit

@@ -403,7 +403,8 @@ public class CreateFunctionAnalyzer {
                 hasVarArgs(argsDef.isVariadic()).intermediateType(intermediateType).objectFile(objectFile)
                 .isAnalyticFn(isAnalyticFn)
                 .symbolName(mainClass.getCanonicalName())
-                .cloudConfiguration(cloudConfiguration);
+                .cloudConfiguration(cloudConfiguration)
+                .setIsolationType(!"shared".equalsIgnoreCase(isolation));
         Function function = builder.build();
         function.setChecksum(checksum);
         return function;
@@ -458,6 +459,10 @@ public class CreateFunctionAnalyzer {
                     .put(PrimitiveType.BIGINT, Long.class)
                     .put(PrimitiveType.CHAR, String.class)
                     .put(PrimitiveType.VARCHAR, String.class)
+                    .put(PrimitiveType.DECIMAL32, java.math.BigDecimal.class)
+                    .put(PrimitiveType.DECIMAL64, java.math.BigDecimal.class)
+                    .put(PrimitiveType.DECIMAL128, java.math.BigDecimal.class)
+                    .put(PrimitiveType.DECIMAL256, java.math.BigDecimal.class)
                     .build();
     private static final Class<?> JAVA_ARRAY_CLASS_TYPE = List.class;
     private static final Class<?> JAVA_MAP_CLASS_TYPE = Map.class;

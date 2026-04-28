@@ -14,6 +14,8 @@
 
 #include "exec/spill/operator_mem_resource_manager.h"
 
+#include <algorithm>
+
 #include "runtime/runtime_state.h"
 
 namespace starrocks::spill {
@@ -50,6 +52,10 @@ size_t OperatorMemoryResourceManager::compute_available_memory_bytes(const Runti
 
 void OperatorMemoryResourceManager::close() {
     _res_guard.reset();
+    _performance_level = MEM_RESOURCE_DEFAULE_MEMORY;
+    _spillable = false;
+    _releaseable = false;
+    _query_spill_manager = nullptr;
 }
 
 void OperatorMemoryResourceManager::ResGuard::reset() noexcept {

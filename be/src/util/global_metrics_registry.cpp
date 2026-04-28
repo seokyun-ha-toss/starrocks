@@ -16,6 +16,7 @@
 
 #include <unistd.h>
 
+#include "base/compression/compression_context_pool_metrics.h"
 #include "exec/pipeline/pipeline_metrics.h"
 #include "fs/fs.h"
 #include "runtime/starrocks_metrics.h"
@@ -34,6 +35,7 @@ const std::string GlobalMetricsRegistry::_s_hook_name = "starrocks_metrics";
 GlobalMetricsRegistry::GlobalMetricsRegistry(StarRocksMetrics* fast_metrics)
         : _fast_metrics(fast_metrics), _metrics(_s_registry_name) {
     DCHECK(_fast_metrics != nullptr);
+    compression::install_compression_context_pool_metrics(&_metrics);
 #define REGISTER_STARROCKS_METRIC(name) _metrics.register_metric(#name, &(_fast_metrics->name))
     // You can put StarRocksMetrics's metrics initial code here
     REGISTER_STARROCKS_METRIC(fragment_requests_total);
@@ -49,6 +51,10 @@ GlobalMetricsRegistry::GlobalMetricsRegistry(StarRocksMetrics* fast_metrics)
     REGISTER_STARROCKS_METRIC(load_channel_add_chunks_wait_memtable_duration_us);
     REGISTER_STARROCKS_METRIC(load_channel_add_chunks_wait_writer_duration_us);
     REGISTER_STARROCKS_METRIC(load_channel_add_chunks_wait_replica_duration_us);
+
+    REGISTER_STARROCKS_METRIC(lake_txn_log_collect_legacy_total);
+    REGISTER_STARROCKS_METRIC(lake_txn_log_collect_per_partition_total);
+    REGISTER_STARROCKS_METRIC(lake_txn_log_collect_orphan_partition_total);
 
     REGISTER_STARROCKS_METRIC(async_delta_writer_execute_total);
     REGISTER_STARROCKS_METRIC(async_delta_writer_task_total);
@@ -266,6 +272,19 @@ GlobalMetricsRegistry::GlobalMetricsRegistry(StarRocksMetrics* fast_metrics)
 
     REGISTER_STARROCKS_METRIC(short_circuit_request_total);
     REGISTER_STARROCKS_METRIC(short_circuit_request_duration_us);
+
+    // flat json metrics
+    REGISTER_STARROCKS_METRIC(flat_json_segment_write_total);
+    REGISTER_STARROCKS_METRIC(flat_json_write_rows_total);
+    REGISTER_STARROCKS_METRIC(flat_json_paths_discovered_total);
+    REGISTER_STARROCKS_METRIC(flat_json_paths_extracted_total);
+    REGISTER_STARROCKS_METRIC(flat_json_access_hit_total);
+    REGISTER_STARROCKS_METRIC(flat_json_access_miss_total);
+    REGISTER_STARROCKS_METRIC(flat_json_cast_duration_ns_total);
+    REGISTER_STARROCKS_METRIC(flat_json_merge_duration_ns_total);
+    REGISTER_STARROCKS_METRIC(flat_json_flatten_duration_ns_total);
+    REGISTER_STARROCKS_METRIC(flat_json_compaction_total);
+    REGISTER_STARROCKS_METRIC(flat_json_compaction_schema_change_total);
 
     // data cache metrics
     REGISTER_STARROCKS_METRIC(datacache_mem_quota_bytes);

@@ -15,7 +15,10 @@
 #pragma once
 
 #include "exec/spill/query_spill_manager.h"
-#include "runtime/runtime_state_fwd.h"
+
+namespace starrocks {
+class RuntimeState;
+} // namespace starrocks
 
 namespace starrocks::spill {
 enum MEM_RESOURCE {
@@ -26,6 +29,8 @@ enum MEM_RESOURCE {
 
 class OperatorMemoryResourceManager {
 public:
+    ~OperatorMemoryResourceManager() noexcept { close(); }
+
     class ResGuard {
     public:
         explicit ResGuard(OperatorMemoryResourceManager& manager) : _manager(manager) {}

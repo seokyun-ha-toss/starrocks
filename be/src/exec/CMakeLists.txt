@@ -21,6 +21,7 @@ set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/src/exec")
 set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/src/exec")
 
 set(EXEC_CORE_FILES
+    exec_node.cpp
     runtime_filter/runtime_filter_descriptor.cpp
     runtime_filter/runtime_filter_probe.cpp
     runtime_filter/runtime_filter_probe_wait.cpp
@@ -34,19 +35,79 @@ ADD_BE_LIB(ExecCore
 
 target_link_libraries(ExecCore PUBLIC ExprCore RuntimeCore)
 
+set(EXEC_SINK_CORE_FILES
+    data_sink.cpp
+)
+
+ADD_BE_LIB(ExecSinkCore
+    ${EXEC_SINK_CORE_FILES}
+)
+
+target_link_libraries(ExecSinkCore PUBLIC Common Base Gutil StarRocksGen)
+
 set(SPILL_CORE_FILES
     spill/dir_manager.cpp
     spill/block_reader.cpp
     spill/log_block_manager.cpp
     spill/file_block_manager.cpp
     spill/hybird_block_manager.cpp
+    spill/query_spill_manager.cpp
+    spill/operator_mem_resource_manager.cpp
 )
 
 ADD_BE_LIB(SpillCore
     ${SPILL_CORE_FILES}
 )
 
-target_link_libraries(SpillCore PUBLIC FSCore IOCore Common Base Gutil StarRocksGen)
+target_link_libraries(SpillCore PUBLIC RuntimeCore FSCore IOCore Common Base Gutil StarRocksGen)
+
+set(EXEC_SCHEMA_SCANNER_CORE_FILES
+    schema_scanner.cpp
+)
+
+ADD_BE_LIB(ExecSchemaScannerCore
+    ${EXEC_SCHEMA_SCANNER_CORE_FILES}
+)
+
+target_link_libraries(ExecSchemaScannerCore PUBLIC
+    ExprCore
+    RuntimeCore
+    ChunkCore
+    ColumnCore
+    TypesCore
+    Common
+    Base
+    Gutil
+    StarRocksGen
+)
+
+set(EXEC_SCHEMA_SCANNER_FILES
+    schema_scanner/schema_be_bvars_scanner.cpp
+    schema_scanner/schema_be_configs_scanner.cpp
+    schema_scanner/schema_be_threads_scanner.cpp
+    schema_scanner/schema_charsets_scanner.cpp
+    schema_scanner/schema_collations_scanner.cpp
+    schema_scanner/schema_dummy_scanner.cpp
+    schema_scanner/schema_events_scanner.cpp
+    schema_scanner/schema_statistics_scanner.cpp
+    schema_scanner/schema_triggers_scanner.cpp
+)
+
+ADD_BE_LIB(ExecSchemaScanners
+    ${EXEC_SCHEMA_SCANNER_FILES}
+)
+
+target_link_libraries(ExecSchemaScanners PUBLIC
+    ExecSchemaScannerCore
+    RuntimeCore
+    ChunkCore
+    ColumnCore
+    TypesCore
+    Common
+    Base
+    Gutil
+    StarRocksGen
+)
 
 set(PIPELINE_PRIMITIVES_SRCS
     pipeline/operator.cpp
@@ -78,11 +139,10 @@ set(PIPELINE_RUNTIME_SRCS
     pipeline/runtime_filter_types.cpp
     workgroup/pipeline_executor_set.cpp
     workgroup/pipeline_executor_set_manager.cpp
-    spill/operator_mem_resource_manager.cpp
-    spill/query_spill_manager.cpp
 )
 
 set(PIPELINE_ADAPTERS_SRCS
+    pipeline/exec_node_pipeline_adapter.cpp
     pipeline/fragment_executor.cpp
     pipeline/pipeline_builder.cpp
 )
@@ -219,12 +279,11 @@ set(EXEC_NON_PIPELINE_FILES
     fetch_node.cpp
     lookup_node.cpp
     capture_version_node.cpp
-    data_sink.cpp
+    data_sink_factory.cpp
+    data_sink_pipeline.cpp
     empty_set_node.cpp
     exec_factory.cpp
-    exec_node.cpp
     pipeline_node.cpp
-    exec_node_executor.cpp
     exchange_node.cpp
     scan_node.cpp
     select_node.cpp
@@ -304,7 +363,7 @@ set(EXEC_NON_PIPELINE_FILES
     dict_decode_node.cpp
     repeat_node.cpp
     table_function_node.cpp
-    schema_scanner.cpp
+    schema_scanner_factory.cpp
     schema_scan_node.cpp
     dictionary_cache_writer.cpp
     arrow_flight_batch_reader.cpp
@@ -328,16 +387,10 @@ set(EXEC_NON_PIPELINE_FILES
     file_scanner/parquet_scanner.cpp
     schema_scanner/schema_analyze_status.cpp
     schema_scanner/schema_tables_scanner.cpp
-    schema_scanner/schema_dummy_scanner.cpp
     schema_scanner/schema_schemata_scanner.cpp
     schema_scanner/schema_variables_scanner.cpp
     schema_scanner/schema_columns_scanner.cpp
     schema_scanner/schema_column_stats_usage_scanner.cpp
-    schema_scanner/schema_charsets_scanner.cpp
-    schema_scanner/schema_collations_scanner.cpp
-    schema_scanner/schema_statistics_scanner.cpp
-    schema_scanner/schema_triggers_scanner.cpp
-    schema_scanner/schema_events_scanner.cpp
     schema_scanner/schema_views_scanner.cpp
     schema_scanner/schema_materialized_views_scanner.cpp
     schema_scanner/schema_tasks_scanner.cpp
@@ -349,17 +402,14 @@ set(EXEC_NON_PIPELINE_FILES
     schema_scanner/schema_schema_privileges_scanner.cpp
     schema_scanner/schema_table_privileges_scanner.cpp
     schema_scanner/schema_tables_config_scanner.cpp
-    schema_scanner/schema_be_metrics_scanner.cpp
     schema_scanner/schema_be_tablets_scanner.cpp
     schema_scanner/schema_be_txns_scanner.cpp
-    schema_scanner/schema_be_configs_scanner.cpp
-    schema_scanner/schema_be_threads_scanner.cpp
     schema_scanner/schema_be_logs_scanner.cpp
+    schema_scanner/schema_be_metrics_scanner.cpp
     schema_scanner/schema_fe_metrics_scanner.cpp
     schema_scanner/schema_fe_threads_scanner.cpp
     schema_scanner/schema_fe_tablet_schedules_scanner.cpp
     schema_scanner/schema_be_compactions_scanner.cpp
-    schema_scanner/schema_be_bvars_scanner.cpp
     schema_scanner/schema_be_cloud_native_compactions_scanner.cpp
     schema_scanner/schema_be_tablet_write_log_scanner.cpp
     schema_scanner/schema_pipe_files.cpp
@@ -395,6 +445,8 @@ set(EXEC_NON_PIPELINE_FILES
     workgroup/mem_tracker_manager.cpp
     workgroup/scan_executor.cpp
     workgroup/scan_task_queue.cpp
+    workgroup/lock_free_scan_task_queue.cpp
+    workgroup/lock_free_work_group_scan_task_queue.cpp
 )
 
 add_library(pipeline_primitives_exec_objs OBJECT
@@ -451,4 +503,4 @@ ADD_BE_LIB(Exec
     $<TARGET_OBJECTS:join_hash_map_inst_objs>
 )
 
-target_link_libraries(Exec PUBLIC ExecCore SpillCore)
+target_link_libraries(Exec PUBLIC ExecSinkCore ExecCore SpillCore ExecSchemaScannerCore ExecSchemaScanners)

@@ -17,6 +17,7 @@ package com.starrocks.lake.qe.scheduler;
 import com.google.common.collect.ImmutableMap;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReportException;
+import com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
 import com.starrocks.qe.scheduler.WorkerProvider;
 import com.starrocks.server.GlobalStateMgr;
@@ -39,6 +40,17 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
     private static final Logger LOG = LogManager.getLogger(SkipBlacklistSharedDataWorkerProvider.class);
 
     public static class Factory implements WorkerProvider.Factory {
+        private final BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy;
+
+        public Factory() {
+            // use default blacklist backup routing policy
+            this(BlacklistBackupRoutingPolicy.getDefault());
+        }
+
+        public Factory(BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy) {
+            this.blacklistBackupRoutingPolicy = blacklistBackupRoutingPolicy;
+        }
+
         @Override
         public SkipBlacklistSharedDataWorkerProvider captureAvailableWorkers(
                 SystemInfoService systemInfoService,
@@ -63,7 +75,8 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
                 throw ErrorReportException.report(ErrorCode.ERR_NO_NODES_IN_WAREHOUSE, warehouse.getName());
             }
 
-            return new SkipBlacklistSharedDataWorkerProvider(idToComputeNode, availableComputeNodes, computeResource);
+            return new SkipBlacklistSharedDataWorkerProvider(idToComputeNode, availableComputeNodes, computeResource,
+                    blacklistBackupRoutingPolicy);
         }
 
         private static ImmutableMap<Long, ComputeNode> filterAvailableWorkersSkipBlacklist(
@@ -81,8 +94,9 @@ public class SkipBlacklistSharedDataWorkerProvider extends DefaultSharedDataWork
 
     protected SkipBlacklistSharedDataWorkerProvider(ImmutableMap<Long, ComputeNode> id2ComputeNode,
                                              ImmutableMap<Long, ComputeNode> availableID2ComputeNode,
-                                             ComputeResource computeResource) {
-        super(id2ComputeNode, availableID2ComputeNode, computeResource);
+                                             ComputeResource computeResource,
+                                             BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy) {
+        super(id2ComputeNode, availableID2ComputeNode, computeResource, blacklistBackupRoutingPolicy);
     }
 
     /**

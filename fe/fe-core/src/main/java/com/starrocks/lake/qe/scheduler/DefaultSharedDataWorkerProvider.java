@@ -23,7 +23,6 @@ import com.google.common.collect.Sets;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReportException;
 import com.starrocks.common.FeConstants;
-import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy;
 import com.starrocks.qe.SessionVariableConstants.ComputationFragmentSchedulingPolicy;
 import com.starrocks.qe.SimpleScheduler;
@@ -60,9 +59,9 @@ import static com.starrocks.qe.WorkerProviderHelper.getNextWorker;
  * - All the nodes will be considered as available after the snapshot nodes info are captured, even though it
  * may not be true all the time.
  * - When calling `selectBackupWorker()`, a backup is chosen from eligible compute nodes (alive at snapshot,
- *   not the given {@code workerId}, and with blacklist rules per session variable
- *   {@code blacklist_backup_routing} / {@code skip_black_list}). The default policy is {@code CIRCULAR}
- *   for the legacy stable walk on the sorted id ring. Use {@code RANDOM} for uniform selection among eligibles.
+ *   not the given {@code workerId}, and with blacklist rules; routing is fixed for the lifetime of this
+ *   provider from the policy supplied at construction (see {@link Factory#Factory(BlacklistBackupRoutingPolicy)}).
+ *   The default policy is {@code CIRCULAR} for the legacy stable walk on the sorted id ring. Use {@code RANDOM}
  * Also in shared-data mode, all nodes will be treated as compute nodes. so the session variable @@prefer_compute_node
  * will be always true, and @@use_compute_nodes will be always -1 which means using all the available compute nodes.
  */
@@ -71,6 +70,17 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
     private static final AtomicInteger NEXT_COMPUTE_NODE_INDEX = new AtomicInteger(0);
 
     public static class Factory implements WorkerProvider.Factory {
+        private final BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy;
+
+        public Factory() {
+            // use default blacklist backup routing policy
+            this(BlacklistBackupRoutingPolicy.getDefault());
+        }
+
+        public Factory(BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy) {
+            this.blacklistBackupRoutingPolicy = blacklistBackupRoutingPolicy;
+        }
+
         @Override
         public DefaultSharedDataWorkerProvider captureAvailableWorkers(
                 SystemInfoService systemInfoService,
@@ -95,7 +105,8 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
                 throw ErrorReportException.report(ErrorCode.ERR_NO_NODES_IN_WAREHOUSE, warehouse.getName());
             }
 
-            return new DefaultSharedDataWorkerProvider(idToComputeNode, availableComputeNodes, computeResource);
+            return new DefaultSharedDataWorkerProvider(idToComputeNode, availableComputeNodes, computeResource,
+                    blacklistBackupRoutingPolicy);
         }
     }
 
@@ -118,16 +129,26 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
 
     private final ComputeResource computeResource;
 
+    private final BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy;
+
     @VisibleForTesting
     public DefaultSharedDataWorkerProvider(ImmutableMap<Long, ComputeNode> id2ComputeNode,
                                            ImmutableMap<Long, ComputeNode> availableID2ComputeNode,
-                                           ComputeResource computeResource
-    ) {
+                                           ComputeResource computeResource) {
+        this(id2ComputeNode, availableID2ComputeNode, computeResource, BlacklistBackupRoutingPolicy.getDefault());
+    }
+
+    @VisibleForTesting
+    public DefaultSharedDataWorkerProvider(ImmutableMap<Long, ComputeNode> id2ComputeNode,
+                                           ImmutableMap<Long, ComputeNode> availableID2ComputeNode,
+                                           ComputeResource computeResource,
+                                           BlacklistBackupRoutingPolicy blacklistBackupRoutingPolicy) {
         this.id2ComputeNode = id2ComputeNode;
         this.availableID2ComputeNode = availableID2ComputeNode;
         this.selectedWorkerIds = Sets.newConcurrentHashSet();
         this.allComputeNodeIds = null;
         this.computeResource = computeResource;
+        this.blacklistBackupRoutingPolicy = blacklistBackupRoutingPolicy;
     }
 
     @Override
@@ -223,22 +244,15 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
         return true;
     }
 
-    private static BlacklistBackupRoutingPolicy currentBlacklistBackupRoutingPolicy() {
-        return ConnectContext.getSessionVariableOrDefault().getBlacklistBackupRoutingPolicy();
-    }
-
-    /**
-     * @param workerId The tablet's primary / preferred compute node id from the plan.
-     */
     @Override
     public long selectBackupWorker(long workerId) {
-        BlacklistBackupRoutingPolicy policy = currentBlacklistBackupRoutingPolicy();
-        if (policy == BlacklistBackupRoutingPolicy.CIRCULAR) {
+        if (blacklistBackupRoutingPolicy == BlacklistBackupRoutingPolicy.CIRCULAR) {
             return selectBackupWorkerCircular(workerId);
-        } else if (policy == BlacklistBackupRoutingPolicy.RANDOM) {
+        } else if (blacklistBackupRoutingPolicy == BlacklistBackupRoutingPolicy.RANDOM) {
             return selectBackupWorkerRandom(workerId);
         } else {
-            throw new IllegalArgumentException("Invalid blacklist backup routing policy: " + policy);
+            throw new IllegalArgumentException("Invalid blacklist backup routing policy: "
+                    + blacklistBackupRoutingPolicy);
         }
     }
 

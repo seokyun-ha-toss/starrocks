@@ -61,8 +61,8 @@ import static com.starrocks.qe.WorkerProviderHelper.getNextWorker;
  * may not be true all the time.
  * - When calling `selectBackupWorker()`, a backup is chosen from eligible compute nodes (alive at snapshot,
  *   not the given {@code workerId}, and with blacklist rules per session variable
- *   {@code blacklist_backup_routing} / {@code skip_black_list}). The default policy is {@code RANDOM}
- *   (uniform among eligibles). Use {@code CIRCULAR} for the legacy stable walk on the sorted id ring.
+ *   {@code blacklist_backup_routing} / {@code skip_black_list}). The default policy is {@code CIRCULAR}
+ *   for the legacy stable walk on the sorted id ring. Use {@code RANDOM} for uniform selection among eligibles.
  * Also in shared-data mode, all nodes will be treated as compute nodes. so the session variable @@prefer_compute_node
  * will be always true, and @@use_compute_nodes will be always -1 which means using all the available compute nodes.
  */

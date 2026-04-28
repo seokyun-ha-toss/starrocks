@@ -420,8 +420,8 @@ public class DefaultSharedDataWorkerProviderTest {
                     }
                 }
                 Assertions.assertTrue(backupId != -1);
-                Assertions.assertFalse(counters.contains(id));
-                counters.add(id);
+                Assertions.assertFalse(counters.contains(backupId));
+                counters.add(backupId);
             }
             // every node is chosen as a backup node once
             Assertions.assertEquals(id2AllNodes.size(), counters.size());

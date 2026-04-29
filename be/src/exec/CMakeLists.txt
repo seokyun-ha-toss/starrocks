@@ -109,6 +109,35 @@ target_link_libraries(ExecSchemaScanners PUBLIC
     StarRocksGen
 )
 
+set(EXEC_SORTING_CORE_FILES
+    sorting/compare_column.cpp
+    sorting/merge.cpp
+    sorting/merge_cascade.cpp
+    sorting/merge_column.cpp
+    sorting/sort_column.cpp
+    sorting/sort_cursor.cpp
+    sorting/sort_permute.cpp
+)
+
+ADD_BE_LIB(ExecSortingCore
+    ${EXEC_SORTING_CORE_FILES}
+)
+
+target_link_libraries(ExecSortingCore PUBLIC
+    ExprCore
+    RuntimeCore
+    ChunkCore
+    ColumnCore
+    TypesCore
+    Common
+    Base
+    Gutil
+    StarRocksGen
+)
+
+# Staged pipeline compatibility groups. These source lists are not final clean
+# module boundaries yet; keep them named by intended ownership so later
+# cycle-cut leaves can promote them into real targets incrementally.
 set(PIPELINE_PRIMITIVES_SRCS
     pipeline/operator.cpp
 )
@@ -190,7 +219,6 @@ set(PIPELINE_OPERATORS_BATCH_SRCS
     pipeline/sink/result_sink_operator.cpp
     pipeline/sink/sink_io_buffer.cpp
     pipeline/sink/blackhole_table_sink_operator.cpp
-    pipeline/scan/morsel.cpp
     pipeline/scan/chunk_buffer_limiter.cpp
     pipeline/sink/file_sink_operator.cpp
     pipeline/sink/export_sink_operator.cpp
@@ -267,7 +295,6 @@ set(PIPELINE_EXTENSIONS_SRCS
     spill/executor.cpp
     spill/spiller.cpp
     spill/spiller_factory.cpp
-    spill/spill_components.cpp
     spill/mem_table.cpp
     spill/serde.cpp
     spill/input_stream.cpp
@@ -433,13 +460,7 @@ set(EXEC_NON_PIPELINE_FILES
     schema_scanner/schema_keywords_scanner.cpp
     schema_scanner/schema_tablet_reshard_jobs_scanner.cpp
     jdbc_scanner.cpp
-    sorting/compare_column.cpp
-    sorting/merge.cpp
-    sorting/merge_column.cpp
     sorting/merge_path.cpp
-    sorting/merge_cascade.cpp
-    sorting/sort_column.cpp
-    sorting/sort_permute.cpp
     connector_scan_node.cpp
     workgroup/work_group.cpp
     workgroup/mem_tracker_manager.cpp
@@ -453,6 +474,10 @@ add_library(pipeline_primitives_exec_objs OBJECT
     ${PIPELINE_PRIMITIVES_SRCS}
 )
 
+# `pipeline/aggregate/aggregate_operators.cpp` intentionally includes the
+# aggregate operator implementation .cpp files to control template
+# instantiation. Do not add those implementation files separately here.
+#
 # Keep graph and adapter sources named separately, but compile them through the
 # runtime compatibility staging target until later cycle-cut leaves land.
 add_library(pipeline_runtime_compat_exec_objs OBJECT
@@ -503,4 +528,4 @@ ADD_BE_LIB(Exec
     $<TARGET_OBJECTS:join_hash_map_inst_objs>
 )
 
-target_link_libraries(Exec PUBLIC ExecSinkCore ExecCore SpillCore ExecSchemaScannerCore ExecSchemaScanners)
+target_link_libraries(Exec PUBLIC ExecSinkCore ExecCore SpillCore ExecSchemaScannerCore ExecSchemaScanners ExecSortingCore)

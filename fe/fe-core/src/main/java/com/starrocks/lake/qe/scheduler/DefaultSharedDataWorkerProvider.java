@@ -58,10 +58,12 @@ import static com.starrocks.qe.WorkerProviderHelper.getNextWorker;
  * is possible that the worker may not be available later when calling the interfaces of this provider.
  * - All the nodes will be considered as available after the snapshot nodes info are captured, even though it
  * may not be true all the time.
- * - When calling `selectBackupWorker()`, a backup is chosen from eligible compute nodes (alive at snapshot,
- *   not the given {@code workerId}, and with blacklist rules; routing is fixed for the lifetime of this
- *   provider from the policy supplied at construction (see {@link Factory#Factory(BlacklistBackupRoutingPolicy)}).
- *   The default policy is {@code CIRCULAR} for the legacy stable walk on the sorted id ring. Use {@code RANDOM}
+ * - Backup selection chooses another compute node when the primary is unusable. Eligible buddies differ from the
+ *   primary worker id; they must have been available when this provider was built from the warehouse snapshot, and must
+ *   pass blacklist checks at backup resolution time as well as at snapshot creation. Which algorithm is used depends
+ *   on {@code BlacklistBackupRoutingPolicy}: {@code CIRCULAR} walks the sorted node id ring
+ *   starting after the primary; {@code RANDOM} picks uniformly among eligible nodes. The default policy is {@code CIRCULAR}
+ *   unless another value is passed at construction, and stays fixed for the lifetime of this provider.
  * Also in shared-data mode, all nodes will be treated as compute nodes. so the session variable @@prefer_compute_node
  * will be always true, and @@use_compute_nodes will be always -1 which means using all the available compute nodes.
  */
@@ -148,7 +150,8 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
         this.selectedWorkerIds = Sets.newConcurrentHashSet();
         this.allComputeNodeIds = null;
         this.computeResource = computeResource;
-        this.blacklistBackupRoutingPolicy = blacklistBackupRoutingPolicy;
+        this.blacklistBackupRoutingPolicy = Preconditions.checkNotNull(blacklistBackupRoutingPolicy,
+                "blacklistBackupRoutingPolicy");
     }
 
     @Override

@@ -138,7 +138,7 @@ public class SkipBlacklistSharedDataWorkerProviderTest {
 
     /**
      * {@link com.starrocks.qe.SessionVariableConstants.BlacklistBackupRoutingPolicy#RANDOM}:
-     * same eligibles as {@link #testSelectBackupWorkerSkipsBlacklist}, but each call draws uniformly from the
+     * same eligibles as {@link #testSelectBackupWorkerSkipsBlacklistCircularPolicy}, but each call draws uniformly from the
      * eligible set (not necessarily the same id as the circular next-node choice).
      */
     @Test

@@ -261,6 +261,7 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
 
     /**
      * Picks a backup worker uniformly at random from the eligible set.
+     * Uses reservoir sampling (k=1) in a single pass to avoid allocating a list per call.
      */
     protected long selectBackupWorkerRandom(long workerId) {
         if (availableID2ComputeNode.isEmpty() || !id2ComputeNode.containsKey(workerId)) {
@@ -272,19 +273,19 @@ public class DefaultSharedDataWorkerProvider implements WorkerProvider {
         Preconditions.checkNotNull(allComputeNodeIds);
         Preconditions.checkState(allComputeNodeIds.contains(workerId));
 
-        List<Long> eligibles = new ArrayList<>();
+        int eligibleCount = 0;
+        long chosen = -1;
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
         for (long buddyId : allComputeNodeIds) {
-            if (isBuddyEligibleForBackup(buddyId, workerId)) {
-                eligibles.add(buddyId);
+            if (!isBuddyEligibleForBackup(buddyId, workerId)) {
+                continue;
+            }
+            eligibleCount++;
+            if (rng.nextInt(eligibleCount) == 0) {
+                chosen = buddyId;
             }
         }
-        if (eligibles.isEmpty()) {
-            return -1;
-        }
-        if (eligibles.size() == 1) {
-            return eligibles.get(0);
-        }
-        return eligibles.get(ThreadLocalRandom.current().nextInt(eligibles.size()));
+        return chosen;
     }
 
     /**
